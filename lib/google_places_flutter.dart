@@ -1,9 +1,10 @@
 library google_places_flutter;
 
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_places_flutter/model/place_details.dart';
+import 'package:google_places_flutter/model/place_type.dart';
 import 'package:google_places_flutter/model/prediction.dart';
 
 import 'package:rxdart/subjects.dart';
@@ -31,6 +32,9 @@ class GooglePlaceAutoCompleteTextField extends StatefulWidget {
   bool showError;
   double? containerHorizontalPadding;
   double? containerVerticalPadding;
+  FocusNode? focusNode;
+  PlaceType? placeType;
+  String? language;
 
   GooglePlaceAutoCompleteTextField(
       {required this.textEditingController,
@@ -45,8 +49,12 @@ class GooglePlaceAutoCompleteTextField extends StatefulWidget {
       this.itemBuilder,
       this.boxDecoration,
       this.isCrossBtnShown = true,
-      this.seperatedBuilder,this.showError=true,this
-      .containerHorizontalPadding,this.containerVerticalPadding});
+      this.seperatedBuilder,
+      this.showError = true,
+      this.containerHorizontalPadding,
+      this.containerVerticalPadding,
+      this.focusNode,
+      this.placeType,this.language='en'});
 
   @override
   _GooglePlaceAutoCompleteTextFieldState createState() =>
@@ -68,16 +76,14 @@ class _GooglePlaceAutoCompleteTextFieldState
 
   CancelToken? _cancelToken = CancelToken();
 
-
-
-
   @override
   Widget build(BuildContext context) {
-
     return CompositedTransformTarget(
       link: _layerLink,
       child: Container(
-        padding: EdgeInsets.symmetric(horizontal: widget.containerHorizontalPadding??0, vertical: widget.containerVerticalPadding??0),
+        padding: EdgeInsets.symmetric(
+            horizontal: widget.containerHorizontalPadding ?? 0,
+            vertical: widget.containerVerticalPadding ?? 0),
         alignment: Alignment.centerLeft,
         decoration: widget.boxDecoration ??
             BoxDecoration(
@@ -93,6 +99,7 @@ class _GooglePlaceAutoCompleteTextFieldState
                 decoration: widget.inputDecoration,
                 style: widget.textStyle,
                 controller: widget.textEditingController,
+                focusNode: widget.focusNode ?? FocusNode(),
                 onChanged: (string) {
                   subject.add(string);
                   if (widget.isCrossBtnShown) {
@@ -114,8 +121,8 @@ class _GooglePlaceAutoCompleteTextFieldState
   }
 
   getLocation(String text) async {
-    String url =
-        "https://maps.googleapis.com/maps/api/place/autocomplete/json?input=$text&key=${widget.googleAPIKey}";
+    String apiURL =
+        "https://maps.googleapis.com/maps/api/place/autocomplete/json?input=$text&key=${widget.googleAPIKey}&language=${widget.language}";
 
     if (widget.countries != null) {
       // in
@@ -124,11 +131,14 @@ class _GooglePlaceAutoCompleteTextFieldState
         String country = widget.countries![i];
 
         if (i == 0) {
-          url = url + "&components=country:$country";
+          apiURL = apiURL + "&components=country:$country";
         } else {
-          url = url + "|" + "country:" + country;
+          apiURL = apiURL + "|" + "country:" + country;
         }
       }
+    }
+    if (widget.placeType != null) {
+      apiURL += "&types=${widget.placeType?.apiString}";
     }
 
     if (_cancelToken?.isCancelled == false) {
@@ -136,8 +146,15 @@ class _GooglePlaceAutoCompleteTextFieldState
       _cancelToken = CancelToken();
     }
 
-
+    print("urlll $apiURL");
     try {
+      String proxyURL = "https://cors-anywhere.herokuapp.com/";
+      String url = kIsWeb ? proxyURL + apiURL : apiURL;
+
+      /// Add the custom header to the options
+      final options = kIsWeb
+          ? Options(headers: {"x-requested-with": "XMLHttpRequest"})
+          : null;
       Response response = await _dio.get(url);
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
 
@@ -157,10 +174,10 @@ class _GooglePlaceAutoCompleteTextFieldState
 
       isSearched = false;
       alPredictions.clear();
-      if (subscriptionResponse.predictions!.length > 0 && (widget.textEditingController.text.toString().trim()).isNotEmpty) {
+      if (subscriptionResponse.predictions!.length > 0 &&
+          (widget.textEditingController.text.toString().trim()).isNotEmpty) {
         alPredictions.addAll(subscriptionResponse.predictions!);
       }
-
 
       this._overlayEntry = null;
       this._overlayEntry = this._createOverlayEntry();
@@ -249,16 +266,21 @@ class _GooglePlaceAutoCompleteTextFieldState
 
     var url =
         "https://maps.googleapis.com/maps/api/place/details/json?placeid=${prediction.placeId}&key=${widget.googleAPIKey}";
-    Response response = await Dio().get(
-      url,
-    );
+    try {
+      Response response = await _dio.get(
+        url,
+      );
 
-    PlaceDetails placeDetails = PlaceDetails.fromJson(response.data);
+      PlaceDetails placeDetails = PlaceDetails.fromJson(response.data);
 
-    prediction.lat = placeDetails.result!.geometry!.location!.lat.toString();
-    prediction.lng = placeDetails.result!.geometry!.location!.lng.toString();
+      prediction.lat = placeDetails.result!.geometry!.location!.lat.toString();
+      prediction.lng = placeDetails.result!.geometry!.location!.lng.toString();
 
-    widget.getPlaceDetailWithLatLng!(prediction);
+      widget.getPlaceDetailWithLatLng!(prediction);
+    } catch (e) {
+      var errorHandler = ErrorHandler.internal().handleError(e);
+      _showSnackBar("${errorHandler.message}");
+    }
   }
 
   void clearData() {
@@ -284,7 +306,7 @@ class _GooglePlaceAutoCompleteTextFieldState
   }
 
   _showSnackBar(String errorData) {
-    if(widget.showError){
+    if (widget.showError) {
       final snackBar = SnackBar(
         content: Text("$errorData"),
       );
@@ -293,7 +315,6 @@ class _GooglePlaceAutoCompleteTextFieldState
       // and use it to show a SnackBar.
       ScaffoldMessenger.of(context).showSnackBar(snackBar);
     }
-
   }
 }
 
